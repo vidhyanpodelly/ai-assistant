@@ -9,21 +9,29 @@ export async function login(formData: FormData) {
   const email = formData.get('email') as string;
   const role = formData.get('role') as string;
 
-  await dbConnect();
-  
-  // Find user by email
-  const user = await User.findOne({ email });
-  if (!user) {
-    return { error: 'Invalid email' };
+  try {
+    await dbConnect();
+    
+    // Find user by email
+    const user = await User.findOne({ email });
+    if (!user) {
+      return { error: 'Invalid email' };
+    }
+
+    // Check if user has the requested role in at least one project
+    const membership = await Membership.findOne({ userId: user._id, role });
+    if (!membership) {
+      return { error: `User is not a ${role} in any project` };
+    }
+
+    await setSession(user._id.toString());
+  } catch (error: any) {
+    console.error('Login Error:', error);
+    return { error: 'Service temporarily unavailable (Database error)' };
   }
 
-  // Check if user has the requested role in at least one project
-  const membership = await Membership.findOne({ userId: user._id, role });
-  if (!membership) {
-    return { error: `User is not a ${role} in any project` };
-  }
-
-  await setSession(user._id.toString());
+  // Redirect must happen outside try/catch in Next.js Server Actions
+  // because redirect() throws an internal error that should not be caught.
   redirect('/');
 }
 

@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Sparkles, User, Bot, Loader2, MoreVertical, MessageSquare } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { Send, Sparkles, User, Bot, MoreVertical } from 'lucide-react';
 
 interface Message {
   _id: string;
@@ -14,8 +14,6 @@ interface Message {
 
 export default function ChatWindow({ projectId, conversationId }: { projectId: string; conversationId: string }) {
   const [input, setInput] = useState('');
-  const [steps, setSteps] = useState<string[]>([]);
-  const [streamingContent, setStreamingContent] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const queryClient = useQueryClient();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -32,7 +30,7 @@ export default function ChatWindow({ projectId, conversationId }: { projectId: s
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamingContent, steps]);
+  }, [messages, isStreaming]);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,8 +39,6 @@ export default function ChatWindow({ projectId, conversationId }: { projectId: s
     const userContent = input;
     setInput('');
     setIsStreaming(true);
-    setStreamingContent('');
-    setSteps(['Analyzing request...']);
 
     try {
       const response = await fetch(`/api/projects/${projectId}/conversations/${conversationId}/messages`, {
@@ -56,55 +52,13 @@ export default function ChatWindow({ projectId, conversationId }: { projectId: s
         throw new Error(errorData.error || 'Server error');
       }
 
-      if (!response.body) throw new Error('No response body');
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { value, done } = await reader.read();
-        
-        if (value) {
-          buffer += decoder.decode(value, { stream: !done });
-          
-          const parts = buffer.split('\n\n');
-          buffer = parts.pop() || '';
-
-          for (const part of parts) {
-            const line = part.trim();
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                if (data.type === 'step') {
-                  setSteps(prev => [...prev, data.step]);
-                } else if (data.type === 'chunk') {
-                  setStreamingContent(prev => prev + data.chunk);
-                } else if (data.type === 'user_message') {
-                  await queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
-                } else if (data.type === 'assistant_message') {
-                  // Final update to messages
-                  await queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
-                } else if (data.type === 'error') {
-                  throw new Error(data.error);
-                }
-              } catch (e) {
-                console.error('SSE parse error:', e, line);
-              }
-            }
-          }
-        }
-
-        if (done) break;
-      }
+      await queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
     } catch (error: any) {
       console.error('Chat error:', error);
-      setSteps(prev => [...prev, `⚠️ ${error.message || 'AI temporarily unavailable'}`]);
+      // Wait a moment before allowing retry
       await new Promise(resolve => setTimeout(resolve, 3000));
     } finally {
       setIsStreaming(false);
-      setStreamingContent('');
-      setSteps([]);
     }
   };
 
@@ -186,37 +140,11 @@ export default function ChatWindow({ projectId, conversationId }: { projectId: s
                     <Bot className="w-4 h-4" />
                   </div>
                   <div className="p-4 rounded-2xl text-sm leading-relaxed bg-white/5 border border-white/10 text-white/90 rounded-tl-none space-y-3">
-                    {streamingContent ? (
-                      <p className="whitespace-pre-wrap">{streamingContent}</p>
-                    ) : (
-                      <div className="flex space-x-1.5 py-1">
-                        <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" />
-                        <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce [animation-delay:0.2s]" />
-                        <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce [animation-delay:0.4s]" />
-                      </div>
-                    )}
-                    <AnimatePresence>
-                      {steps.length > 0 && (
-                        <motion.div 
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="pt-2 border-t border-white/5 space-y-1"
-                          data-testid="ai-trace-steps"
-                        >
-                          {steps.map((step, idx) => (
-                            <div key={idx} className={`text-[10px] font-mono flex items-center ${idx === steps.length - 1 ? 'text-blue-400' : 'text-white/20'}`}>
-                              {idx === steps.length - 1 ? (
-                                <Loader2 className="w-3 h-3 mr-2 animate-spin" />
-                              ) : (
-                                <div className="w-1 h-1 bg-white/20 rounded-full mr-3 ml-1" />
-                              )}
-                              {step}
-                            </div>
-                          ))}
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+                    <div className="flex space-x-1.5 py-1">
+                      <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" />
+                      <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce [animation-delay:0.2s]" />
+                      <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce [animation-delay:0.4s]" />
+                    </div>
                   </div>
                 </div>
               </div>

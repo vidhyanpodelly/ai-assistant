@@ -1,19 +1,13 @@
-import { OpenRouter } from "@openrouter/sdk";
-
-export async function generateAssistantStreamingResponse(
+export async function generateAssistantResponse(
   userMessage: string, 
-  context: string, 
-  onChunk: (chunk: string) => void
+  context: string
 ) {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey || apiKey === '') {
     const errorMsg = "⚠️ OPENROUTER_API_KEY is missing in environment variables.";
     console.error(errorMsg);
-    onChunk(errorMsg);
     return "Service unavailable";
   }
-
-  const openrouter = new OpenRouter({ apiKey });
 
   try {
     const prompt = `
@@ -31,33 +25,39 @@ export async function generateAssistantStreamingResponse(
       - Be concise.
     `;
 
-    const stream = await openrouter.chat.send({
-      chatRequest: {
-        model: "openai/gpt-oss-120b:free",
-        messages: [{ role: "user", content: prompt }],
-        stream: true,
-      }
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "http://localhost:3000",
+        "X-Title": "NextJS App"
+      },
+      body: JSON.stringify({
+        model: "openai/gpt-3.5-turbo",
+        messages: [{ role: "user", content: prompt }]
+      })
     });
 
-    let fullMessage = "";
-    // The SDK returns an async iterable for streaming
-    for await (const chunk of stream as any) {
-      const content = chunk.choices[0]?.delta?.content || "";
-      if (content) {
-        fullMessage += content;
-        onChunk(content);
-      }
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("OpenRouter API Error:", response.status, errorText);
+      throw new Error(`OpenRouter API Error: ${response.status}`);
     }
 
-    return fullMessage;
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || "";
+    
+    if (!content) {
+      throw new Error("Empty response from AI");
+    }
+
+    return content;
   } catch (error: any) {
     console.error('AI Service Error details:', {
       message: error.message,
-      stack: error.stack,
-      status: error.status,
-      data: error.data
+      stack: error.stack
     });
-    onChunk(`\n\n⚠️ AI temporarily unavailable. Please try again.`);
-    return "Error occurred";
+    return "⚠️ AI temporarily unavailable. Please try again.";
   }
 }
