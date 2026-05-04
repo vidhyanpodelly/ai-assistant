@@ -33,7 +33,7 @@ export async function generateAssistantStreamingResponse(
 
     const stream = await openrouter.chat.send({
       chatRequest: {
-        model: "meta-llama/llama-3-8b-instruct:free",
+        model: "openai/gpt-oss-120b:free",
         messages: [{ role: "user", content: prompt }],
         stream: true,
       }
