@@ -3,6 +3,9 @@ import { getSession } from '@/lib/auth';
 import { getMessages, handleStreamingChat } from '@/services/chat.service';
 import { MessageSchema } from '@/lib/validations/schemas';
 
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60; // Set to 60s for Pro, or best effort on Hobby
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ slug: string, conversationId: string }> }
@@ -43,6 +46,9 @@ export async function POST(
         const sendUpdate = (data: any) => {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
         };
+
+        // Immediate heartbeat to keep Vercel connection alive
+        sendUpdate({ type: 'step', step: 'Initializing session...' });
 
         try {
           await handleStreamingChat(
