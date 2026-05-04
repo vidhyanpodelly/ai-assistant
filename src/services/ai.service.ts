@@ -1,19 +1,19 @@
 import { OpenRouter } from "@openrouter/sdk";
 
-const openrouter = new OpenRouter({
-  apiKey: process.env.OPENROUTER_API_KEY || ''
-});
-
 export async function generateAssistantStreamingResponse(
   userMessage: string, 
   context: string, 
   onChunk: (chunk: string) => void
 ) {
-  if (!process.env.OPENROUTER_API_KEY) {
-    console.error('OPENROUTER_API_KEY is missing');
-    onChunk("The assistant service is currently unavailable. Please check configuration.");
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey || apiKey === '') {
+    const errorMsg = "⚠️ OPENROUTER_API_KEY is missing in environment variables.";
+    console.error(errorMsg);
+    onChunk(errorMsg);
     return "Service unavailable";
   }
+
+  const openrouter = new OpenRouter({ apiKey });
 
   try {
     const prompt = `

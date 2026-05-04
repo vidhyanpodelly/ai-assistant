@@ -24,6 +24,7 @@ export async function handleStreamingChat(userId: string, projectId: string, con
   await dbConnect();
 
   // 1. Fetch conversation and check authorization in parallel
+  onUpdate({ type: 'step', step: 'Verifying permissions...' });
   const [authorized, conversation] = await Promise.all([
     canAccessProject(userId, projectId),
     Conversation.findOne({ _id: conversationId, projectId })
@@ -33,7 +34,7 @@ export async function handleStreamingChat(userId: string, projectId: string, con
   if (!conversation) throw new Error('Conversation not found');
 
   // 2. Parallelize message saving and integration fetch
-  onUpdate({ type: 'step', step: 'Fetching integration data...' });
+  onUpdate({ type: 'step', step: 'Fetching integration context...' });
   
   const [userMsg, integration] = await Promise.all([
     Message.create({ conversationId, role: 'user', content }),
@@ -46,6 +47,7 @@ export async function handleStreamingChat(userId: string, projectId: string, con
     const { context } = integration;
     
     // 3. AI Stream with first-token detection
+    onUpdate({ type: 'step', step: 'Connecting to AI engine...' });
     let fullResponse = "";
     let firstTokenReceived = false;
     
