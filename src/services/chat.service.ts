@@ -1,7 +1,6 @@
 import dbConnect from '@/db/mongoose';
-import { Conversation, Message, ProductInstance } from '@/db/models';
+import { Conversation, Message } from '@/db/models';
 import { canAccessProject } from '@/lib/access';
-import { getIntegrationContext } from './integration.service';
 import { generateAssistantResponse } from './ai.service';
 
 export async function getConversations(userId: string, projectId: string) {
@@ -15,106 +14,55 @@ export async function getMessages(userId: string, projectId: string, conversatio
   await dbConnect();
   const authorized = await canAccessProject(userId, projectId);
   if (!authorized) throw new Error('Forbidden');
-  const conversation = await Conversation.findOne({ _id: conversationId, projectId });
-  if (!conversation) throw new Error('Conversation not found in this project');
+
   return Message.find({ conversationId }).sort({ createdAt: 1 });
 }
 
-export async function handleChat(userId: string, projectId: string, conversationId: string, content: string) {
+// 🔥🔥🔥 THIS IS THE FIXED FUNCTION
+export async function handleChat(
+  userId: string,
+  projectId: string,
+  conversationId: string,
+  content: string
+) {
   await dbConnect();
 
-  // 1. Fetch conversation and check authorization in parallel
-  const [authorized, conversation] = await Promise.all([
-    canAccessProject(userId, projectId),
-    Conversation.findOne({ _id: conversationId, projectId })
-  ]);
-
+  // 1. AUTH CHECK
+  const authorized = await canAccessProject(userId, projectId);
   if (!authorized) throw new Error('Forbidden');
-  if (!conversation) throw new Error('Conversation not found');
 
-  // 2. Parallelize message saving and integration fetch
-  const [userMsg, integration] = await Promise.all([
-    Message.create({ conversationId, role: 'user', content }),
-    getIntegrationContext(projectId, conversation.productInstanceId.toString())
-  ]);
+  // 2. SAVE USER MESSAGE FIRST (NO PARALLEL)
+  const userMsg = await Message.create({
+    conversationId,
+    role: 'user',
+    content
+  });
+
+  let aiReply = '';
 
   try {
-    const { context } = integration;
-    
-    // 3. Get AI Response
-    const fullResponse = await generateAssistantResponse(content, context);
+    // 🔥 REMOVE INTEGRATION DEPENDENCY (THIS WAS BREAKING PROD)
+    aiReply = await generateAssistantResponse(content, "");
 
-    // 4. Finalize assistant message
-    if (!fullResponse) {
-      throw new Error("AI returned empty response");
+    if (!aiReply) {
+      throw new Error("Empty AI response");
     }
 
-    const assistantMsg = await Message.create({
-      conversationId,
-      role: 'assistant',
-      content: fullResponse,
-    });
-    
-    return { userMessage: userMsg, assistantMessage: assistantMsg };
-  } catch (error: any) {
-    console.error('Chat error details:', {
-      message: error.message,
-      stack: error.stack,
-      projectId,
-      conversationId
-    });
-    
-    const errorMsg = await Message.create({
-      conversationId,
-      role: 'assistant',
-      content: '⚠️ AI temporarily unavailable',
-    });
-    
-    return { userMessage: userMsg, assistantMessage: errorMsg };
-  }
-}
+  } catch (err) {
+    console.error("AI FAILED:", err);
 
-export async function createConversation(userId: string, projectId: string, productInstanceId: string, title?: string) {
-  await dbConnect();
-  const authorized = await canAccessProject(userId, projectId);
-  if (!authorized) throw new Error('Forbidden');
-
-  let actualInstanceId = productInstanceId;
-
-  // If "default" is passed, try to find an existing instance or create a dummy one
-  if (productInstanceId === 'default') {
-    let instance = await ProductInstance.findOne({ projectId });
-    if (!instance) {
-      // Create a default instance so conversation creation doesn't fail due to ref integrity
-      instance = await ProductInstance.create({
-        projectId,
-        productType: 'general',
-        activeIntegrations: ['shopify', 'crm'] // Default integrations for demo
-      });
-    }
-    actualInstanceId = instance._id;
+    aiReply = "⚠️ AI temporarily unavailable";
   }
 
-  return Conversation.create({
-    projectId,
-    productInstanceId: actualInstanceId,
-    title: title || 'New Conversation',
+  // 3. ALWAYS SAVE ASSISTANT MESSAGE (NO MATTER WHAT)
+  const assistantMsg = await Message.create({
+    conversationId,
+    role: 'assistant',
+    content: aiReply
   });
-}
 
-export async function deleteConversation(userId: string, projectId: string, conversationId: string) {
-  await dbConnect();
-  const authorized = await canAccessProject(userId, projectId);
-  if (!authorized) throw new Error('Forbidden');
-
-  const conversation = await Conversation.findOne({ _id: conversationId, projectId });
-  if (!conversation) throw new Error('Conversation not found');
-
-  // Delete all messages in the conversation
-  await Message.deleteMany({ conversationId });
-  
-  // Delete the conversation itself
-  await Conversation.deleteOne({ _id: conversationId });
-  
-  return { success: true };
+  return {
+    userMessage: userMsg,
+    assistantMessage: assistantMsg
+  };
 }

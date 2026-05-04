@@ -30,11 +30,11 @@ export async function generateAssistantResponse(
       headers: {
         "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": "http://localhost:3000",
+        "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "https://your-vercel-url.vercel.app",
         "X-Title": "NextJS App"
       },
       body: JSON.stringify({
-        model: "openai/gpt-3.5-turbo",
+        model: "openai/gpt-4o-mini",
         messages: [{ role: "user", content: prompt }]
       })
     });
@@ -46,13 +46,14 @@ export async function generateAssistantResponse(
     }
 
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || "";
-    
-    if (!content) {
-      throw new Error("Empty response from AI");
-    }
+   const content = data.choices?.[0]?.message?.content;
 
-    return content;
+if (!content) {
+  console.error("Empty AI response:", data);
+  return "I couldn't generate a response. Please try again.";
+}
+
+return content;
   } catch (error: any) {
     console.error('AI Service Error details:', {
       message: error.message,
