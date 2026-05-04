@@ -51,46 +51,56 @@ export default function ChatWindow({ projectId, conversationId }: { projectId: s
         body: JSON.stringify({ content: userContent }),
       });
 
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Failed to send message' }));
+        throw new Error(errorData.error || 'Server error');
+      }
+
       if (!response.body) throw new Error('No response body');
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      
       let buffer = '';
+
       while (true) {
         const { value, done } = await reader.read();
-        if (done) break;
         
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n\n');
-        buffer = lines.pop() || '';
+        if (value) {
+          buffer += decoder.decode(value, { stream: !done });
+          
+          const parts = buffer.split('\n\n');
+          buffer = parts.pop() || '';
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (data.type === 'step') {
-                setSteps(prev => [...prev, data.step]);
-              } else if (data.type === 'chunk') {
-                setStreamingContent(prev => prev + data.chunk);
-              } else if (data.type === 'user_message') {
-                queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
-              } else if (data.type === 'assistant_message') {
-                await queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
-              } else if (data.type === 'error') {
-                throw new Error(data.error);
+          for (const part of parts) {
+            const line = part.trim();
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                if (data.type === 'step') {
+                  setSteps(prev => [...prev, data.step]);
+                } else if (data.type === 'chunk') {
+                  setStreamingContent(prev => prev + data.chunk);
+                } else if (data.type === 'user_message') {
+                  await queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+                } else if (data.type === 'assistant_message') {
+                  // Final update to messages
+                  await queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+                } else if (data.type === 'error') {
+                  throw new Error(data.error);
+                }
+              } catch (e) {
+                console.error('SSE parse error:', e, line);
               }
-            } catch (e) {
-              console.error('Error parsing SSE line', e);
             }
           }
         }
+
+        if (done) break;
       }
     } catch (error: any) {
       console.error('Chat error:', error);
       setSteps(prev => [...prev, `⚠️ ${error.message || 'AI temporarily unavailable'}`]);
-      // Wait a bit so user can see the error
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 3000));
     } finally {
       setIsStreaming(false);
       setStreamingContent('');
