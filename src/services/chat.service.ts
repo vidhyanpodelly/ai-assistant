@@ -22,39 +22,51 @@ export async function getMessages(userId: string, projectId: string, conversatio
 
 export async function handleStreamingChat(userId: string, projectId: string, conversationId: string, content: string, onUpdate: (data: any) => void) {
   await dbConnect();
-  const authorized = await canAccessProject(userId, projectId);
-  if (!authorized) throw new Error('Forbidden');
 
-  const conversation = await Conversation.findOne({ _id: conversationId, projectId });
+  // 1. Fetch conversation and check authorization in parallel
+  const [authorized, conversation] = await Promise.all([
+    canAccessProject(userId, projectId),
+    Conversation.findOne({ _id: conversationId, projectId })
+  ]);
+
+  if (!authorized) throw new Error('Forbidden');
   if (!conversation) throw new Error('Conversation not found');
 
-  // 1. Save user message
-  const userMsg = await Message.create({
-    conversationId,
-    role: 'user',
-    content,
-  });
+  // 2. Parallelize message saving and integration fetch
+  onUpdate({ type: 'step', step: 'Fetching integration data...' });
+  
+  const [userMsg, integration] = await Promise.all([
+    Message.create({ conversationId, role: 'user', content }),
+    getIntegrationContext(projectId, conversation.productInstanceId.toString())
+  ]);
+
   onUpdate({ type: 'user_message', message: userMsg });
 
   try {
-    // 2. Integration fetch
-    onUpdate({ type: 'step', step: 'Fetching integration data...' });
-    const { context, steps } = await getIntegrationContext(projectId, conversation.productInstanceId.toString());
+    const { context } = integration;
     
-    // 3. AI Stream
-    onUpdate({ type: 'step', step: 'Generating response...' });
+    // 3. AI Stream with first-token detection
     let fullResponse = "";
+    let firstTokenReceived = false;
     
     await generateAssistantStreamingResponse(content, context, (chunk) => {
+      if (!firstTokenReceived) {
+        onUpdate({ type: 'step', step: 'Generating response...' });
+        firstTokenReceived = true;
+      }
       fullResponse += chunk;
       onUpdate({ type: 'chunk', chunk });
     });
 
-    // 4. Save assistant message
+    // 5. Finalize assistant message
+    if (!fullResponse) {
+      throw new Error("AI returned empty response");
+    }
+
     const assistantMsg = await Message.create({
       conversationId,
       role: 'assistant',
-      content: fullResponse || "AI temporarily unavailable. Please try again.",
+      content: fullResponse,
     });
     
     onUpdate({ type: 'assistant_message', message: assistantMsg });
@@ -65,7 +77,7 @@ export async function handleStreamingChat(userId: string, projectId: string, con
       projectId,
       conversationId
     });
-    onUpdate({ type: 'error', error: `AI Error: ${error.message}` });
+    onUpdate({ type: 'error', error: `AI temporarily unavailable` });
   }
 }
 
